@@ -15,9 +15,8 @@ The batch size for each call to `reap_identity`.
 It is set to a small value such that in case of a bug, the script wont burn
 through a lot of funds.
 """
-BATCH_SIZE = 16
 
-import json
+import time
 import os
 from substrateinterface import SubstrateInterface, Keypair
 from substrateinterface.exceptions import SubstrateRequestException
@@ -25,13 +24,17 @@ from substrateinterface.exceptions import SubstrateRequestException
 chain = SubstrateInterface(
 	#url="ws://127.0.0.1:9944",
 	# Using the public endpoint can get you rate-limited.
-	# url="wss://kusama-rpc.polkadot.io",
+	# Westend
+	# url="wss://westend-rpc.polkadot.io",
+	# Kusama
+	url="wss://kusama-people-rpc.polkadot.io",
 	# Or use some external node:
-	url="wss://rococo-try-runtime-node.parity-chains.parity.io:443"
+	# url="wss://rococo-try-runtime-node.parity-chains.parity.io:443"
 )
 
 print(f"Connected to {chain.name}: {chain.chain} v{chain.version}")
 
+wait_for_inclusion = False
 sender_uri = os.getenv('SENDER_URI', '//Alice')
 sender = Keypair.create_from_uri(sender_uri)
 print(f"Using sender account {sender.ss58_address}")
@@ -47,36 +50,26 @@ def main():
 
 	print(f"Migrating {len(unmigrated)} identities")
 
-	for chunk in chunks(unmigrated, BATCH_SIZE):
-		batch = []
-
-		for user in chunk:
-			batch.append(chain.compose_call(
-				call_module='IdentityMigrator',
-				call_function='reap_identity',
-				call_params={
-					'who': user,
-				}
-			))
-			print(f' - {user}')
-
+	for user in unmigrated:
 		call = chain.compose_call(
-			call_module='Utility',
-			call_function='batch',
+			call_module='IdentityMigrator',
+			call_function='reap_identity',
 			call_params={
-				'calls': batch,
+				'who': user,
 			}
 		)
 		extrinsic = chain.create_signed_extrinsic(call=call, keypair=sender)
-		print(f'Sending {len(batch)} batched calls in extrinsic {extrinsic.hash}')
+		# print(f'{extrinsic}')
+		print(f'Sending call for {user}')
 
 		try:
-			receipt = chain.submit_extrinsic(extrinsic, wait_for_inclusion=True)
+			receipt = chain.submit_extrinsic(extrinsic, wait_for_inclusion)
 			print(f"Extrinsic included in block {receipt.block_hash}: "
 				f"consumed {receipt.weight['ref_time'] / weight_second} seconds of weight and "
 				f"paid {(receipt.total_fee_amount or 0) / 10**decimals} {chain.token_symbol}")
-			if receipt.total_fee_amount > 0:
-				raise Exception("Fee payed 😱")
+			# Don't totally spam the chain
+			if not wait_for_inclusion:
+				time.sleep(1)
 		except SubstrateRequestException as e:
 			print(f"Failed to submit extrinsic: {e}")
 			raise e
@@ -90,14 +83,6 @@ def identities():
 	for (account, data) in query:
 		accs.append(account.value)
 	return accs
-
-def chunks(list, n):
-	"""
-	Lazily split 'list' into 'n'-sized chunks.
-	"""
-	for i in range(0, len(list), n):
-		yield list[i:i + n]
-
 
 if __name__ == "__main__":
 	main()

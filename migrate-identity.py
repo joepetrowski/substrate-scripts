@@ -20,56 +20,33 @@ import os
 from substrateinterface import SubstrateInterface, Keypair
 from substrateinterface.exceptions import SubstrateRequestException
 
+# Config
+
+# Set a limit. E.g. `limit = 5` will only migrate 5 identities. `None` will do all.
+limit = None
+# Actually submit extrinsics to the chain. If `False`, it will just log stuff to console.
+submit = False
+# The chain to connect to.
 chain = SubstrateInterface(
 	#url="ws://127.0.0.1:9944",
 	# Using the public endpoint can get you rate-limited.
 	# Westend
 	# url="wss://westend-rpc.polkadot.io",
 	# Kusama
-	url="wss://kusama-try-runtime-node.parity-chains.parity.io:443",
+	# url="wss://kusama-try-runtime-node.parity-chains.parity.io:443",
+	# Polkadot
+	url="wss://polkadot-try-runtime-node.parity-chains.parity.io:443",
 	# Or use some external node:
 	# url="wss://rococo-try-runtime-node.parity-chains.parity.io:443"
 )
 
 print(f"Connected to {chain.name}: {chain.chain} v{chain.version}")
 
-wait_for_inclusion = True
 sender_uri = os.getenv('SENDER_URI', '//Alice')
 sender = Keypair.create_from_uri(sender_uri)
 print(f"Using sender account {sender.ss58_address}")
 
-weight_second = 1e12
 decimals = chain.token_decimals or 0
-
-# Kusama "problems"
-need_funding = [
-	'Hw4J3VBtCGnHufxTkDJHvsWxS8iKE7LyBKH5pYA6MNQGxAJ',
-	'DAhmGRNP9tSxYn3x9JmNSeqm6cYwBx2vLrGBF1i1Pp1Awi8',
-	'F7sLQmzKw2CyKr2krKQRQZL1y4E7FzFXAbvV8KrzKeb5HQX',
-	'EZv3htNfDpYt6m42xBaEbLr2Y2ZcPjHvY9y6tvZEcWBmefJ',
-	'EB9N9Qyej8zcCVmRQaPRTTdZFHvnK3o7xKEnus7mJ5ErmGC',
-	'DwbHothibGR4fuMfuKh6zBhUSTcgwHhZ5xxfmDC61h9B3U7',
-	'ESJv66mEU2a2r6gmmUYgjwZFU59TMPpEbcmdPgHfXg6qaZb',
-	'GJ9CvUDXGKV51iZBawhQ9d18oQNuefDg1mSg5vW6NtGTvDt',
-	'CwhoqP9qY3ZBRM5ZYCpBzz5tYZEYULVQrPPc98xr5HbH555',
-	'DV4mtkWPzTwnFNM5LvRJUZTNXW23rGji2N8VQdGHUDzZcjX',
-	'FvgbJ5qNw3jpV5KN7yNZ9ZeBwC6DdrqsBKonuTVUgoB1rjk',
-	'HtKtEzu9g6FwAFfyWsUEG4pTPEdD1rGH1Jyxe8WvHNLj8VY',
-	'J3dMirndvThJKJT7vWuUgh5tqmzRWfPA9YhEANBZG5SVcoy',
-	'FPJxsupc3LWLjHfL9nh64dmVKvXvGGpdFseqFyPVBNR8wMa',
-	'CgGKH1dsPgJkQ3caFsnDtMUWUqVJKEpRt1ekM5RDW4UrYhP',
-	'FP7Tvuid4tf1aeX9oGLedshiHSaFEQtEMSEDAcDExG8H3GA',
-	'CzJSFEuiLHD1defThphhyXEd3AwxBMPpZvUbqnzpFBx4z4y',
-	'GS8cNk9ysUwoBp2ibWYNzjDvR9R4f9iyKoYdnDBbdP1ZDbn',
-	'GeXF6s9yv7UyhKzLMkpSZwoVwhDrN3xcBamwfRg6zphR6Fy',
-	'J6fWu1bGYWSBSznpdUvcj1pvidEjsD4Pii9D1eyJgWNdzJF',
-	'HvRV8gaVwfXHsV3zeBh8N6uK8xnvTfQPupXwyehyfGmzd5m',
-	'Gek2uCr3kWqdt8eSaYzE1GxNn3b1RB1FYgzyQuKhhJ63X7r',
-	'FP1Qh2nTBr7RvXxmj5AUZ96rMDHEhTvqKYEAyAWgQKDCMau',
-	'DrPFcfMyzRM3KtqEvZZv22qUQTEDRSUNDPuJPPT5vS4pq6j',
-	'GHTDNsavESZRBVi6iEWJZQV1uPynsvLQ4v9wLGTM192FFoq',
-	'J6R1Ds3WfbZ3nm1Jn8N4jssz2Cj9QPyUpECssnKAPMfycFh',
-]
 
 def main():
 	unmigrated = identities()
@@ -79,54 +56,56 @@ def main():
 
 	subs = get_subs()
 
-	# For Kusama
-	id_dep = 7_000_000_000
-	sub_dep = 7_000_000_000
+	id_dep = id_deposit()
+	sub_dep = sub_deposit()
+	ed = 10_000_000_000 # 1 DOT
 
 	print(f"Migrating {len(unmigrated)} identities")
 
 	count = 0
 
 	for user in unmigrated:
-		# if user in errors:
-		# 	print(f"skipping {user}")
-		# 	continue
-		#
-		# TODO: Check if extrinsic success, if false then add user to this list and try again.
-		if user in need_funding:
-			num_subs = subs_of(user, subs)
-			amount = 0
-			
-			if num_subs > 0:
-				amount += (id_dep + sub_dep)
-			else:
-				amount += id_dep
-			
-			transfer_call = balance_transfer(user, amount)
-			reap_call = reap(user)
-			batch = batch_all_calls([transfer_call, reap_call])
+		# First, check their balance.
+		balance = get_balance(user)
 
-			extrinsic = chain.create_signed_extrinsic(call=batch, keypair=sender)
+		# Calculate the amount they will need.
+		num_subs = subs_of(user, subs)
+		amount_needed = id_dep + (num_subs * sub_dep)
+
+		# If they need funding, construct a transfer call.
+		transfer_call = None
+		if balance < amount_needed:
+			print(f"User {user} has low balance:")
+			print(f"    Balance:  {balance / 10**decimals}")
+			print(f"    Required: {amount_needed / 10**decimals}")
+			needed = max(ed, amount_needed - balance)
+			transfer_call = balance_transfer(user, needed)
+
+		reap_call = reap(user)
+
+		if not transfer_call:
+			call = reap_call
 		else:
-			reap_call = reap(user)
-			extrinsic = chain.create_signed_extrinsic(call=reap_call, keypair=sender)
-		
-		# print(f'{extrinsic}')
+			call = batch_all_calls([transfer_call, reap_call])
+
+		extrinsic = chain.create_signed_extrinsic(call, keypair=sender)
+
 		print(f'Sending call for {user}')
 
-		try:
-			receipt = chain.submit_extrinsic(extrinsic, wait_for_inclusion)
-			print(f"Extrinsic included in block {receipt.block_hash}: "
-				f"paid {(receipt.total_fee_amount or 0) / 10**decimals} {chain.token_symbol}")
-		except SubstrateRequestException as e:
-			print(f"Failed to submit extrinsic: {e}")
-			raise e
+		if submit:
+			try:
+				receipt = chain.submit_extrinsic(extrinsic, wait_for_inclusion=True)
+				print(f"Extrinsic included in block {receipt.block_hash}: "
+					f"paid {(receipt.total_fee_amount or 0) / 10**decimals} {chain.token_symbol}")
+			except SubstrateRequestException as e:
+				print(f"Failed to submit extrinsic: {e}")
+				raise e
 
 		count += 1
 		if count % 100 == 0:
 			print(f"\n\nMigrated {count} identities\n\n")
-		# if count > 0:
-		# 	break
+		if limit and count > limit:
+			break
 
 # Get the next `page_size` identities to be migrated.
 def identities():
@@ -138,6 +117,7 @@ def identities():
 		accs.append(account.value)
 	return accs
 
+# Fetch the entire map of sub accounts.
 def get_subs():
 	query = chain.query_map('Identity', 'SubsOf')
 	return query
@@ -149,6 +129,12 @@ def subs_of(who, map) -> int:
 			return len(ii.value[1])
 	return 0
 
+# Get the balance of a user `who`.
+def get_balance(who):
+	query = chain.query("System", "Account", [who])
+	return query.value['data']['free'] + query.value['data']['reserved']
+
+# Construct a balance transfer call.
 def balance_transfer(who, amount):
 	call = chain.compose_call(
 		call_module='Balances',
@@ -160,6 +146,7 @@ def balance_transfer(who, amount):
 	)
 	return call
 
+# Construct a `reap_identity` call.
 def reap(who):
 	call = chain.compose_call(
 		call_module='IdentityMigrator',
@@ -170,6 +157,7 @@ def reap(who):
 	)
 	return call
 
+# Batch an array of `calls` using `batch_all`.
 def batch_all_calls(calls: list):
 	call = chain.compose_call(
 		call_module='Utility',
@@ -179,6 +167,28 @@ def batch_all_calls(calls: list):
 		}
 	)
 	return call
+
+# Get the deposit rate on a system parachain.
+def para_deposit(items, size):
+	units = 10_000_000_000
+	dollars = units
+	cents = dollars / 100
+	millicents = cents / 1_000
+	return (items * 20 * dollars + size * 100 * millicents) / 100
+
+# Get the max ID deposit on the People chain.
+def id_deposit():
+	items = 1
+	# min is 17, but this param has such a small effect it's not even worth looking it up for each
+	# person
+	max_size = 318
+	return para_deposit(items, max_size)
+
+# Get the deposit required per sub account on the People chain.
+def sub_deposit():
+	items = 1
+	size = 53
+	return para_deposit(items, size)
 
 if __name__ == "__main__":
 	main()
